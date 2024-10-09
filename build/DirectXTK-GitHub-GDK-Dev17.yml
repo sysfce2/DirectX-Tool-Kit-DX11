@@ -25,6 +25,7 @@ pr:
     - build/*.in
     - build/*.cmake
     - build/SetupBWOI.*
+    - Src/Shaders/CompileShaders.cmd
 
 resources:
   repositories:
@@ -58,8 +59,6 @@ jobs:
     fetchTags: false
   - task: NuGetToolInstaller@1
     displayName: 'Use NuGet'
-    inputs:
-      versionSpec: '6.5.x'
   - task: PowerShell@2
     displayName: 'Create nuget.config with single source'
     inputs:
@@ -83,11 +82,13 @@ jobs:
       arguments: sources add -Name xboxgdk -Source $(URL_FEED) -ConfigFile $(Build.SourcesDirectory)\NuGet.config
   - task: nuget-security-analysis@0
     displayName: 'Secure Supply Chain Analysis'
+  - task: NuGetAuthenticate@1
+    displayName: 'NuGet Auth'
   - task: NuGetCommand@2
     displayName: NuGet install PGDK
     inputs:
       command: custom
-      arguments: install -prerelease Microsoft.GDK.PC.$(GDK_EDITION) -ExcludeVersion -OutputDirectory $(EXTRACTED_FOLDER)\GDK
+      arguments: install -prerelease Microsoft.GDK.PC.$(GDK_EDITION) -ExcludeVersion -OutputDirectory $(EXTRACTED_FOLDER)
   - task: CopyFiles@2
     displayName: Set up Directory.Build.props
     inputs:
@@ -129,8 +130,6 @@ jobs:
     fetchTags: false
   - task: NuGetToolInstaller@1
     displayName: 'Use NuGet'
-    inputs:
-      versionSpec: '6.5.x'
   - task: PowerShell@2
     displayName: 'Create nuget.config with single source'
     inputs:
@@ -154,11 +153,13 @@ jobs:
       arguments: sources add -Name xboxgdk -Source $(URL_FEED) -ConfigFile $(Build.SourcesDirectory)\NuGet.config
   - task: nuget-security-analysis@0
     displayName: 'Secure Supply Chain Analysis'
+  - task: NuGetAuthenticate@1
+    displayName: 'NuGet Auth'
   - task: NuGetCommand@2
     displayName: NuGet install PGDK
     inputs:
       command: custom
-      arguments: install -prerelease Microsoft.GDK.PC.$(GDK_EDITION) -ExcludeVersion -OutputDirectory $(EXTRACTED_FOLDER)\GDK
+      arguments: install -prerelease Microsoft.GDK.PC.$(GDK_EDITION) -ExcludeVersion -OutputDirectory $(EXTRACTED_FOLDER)
   - task: CmdLine@2
     displayName: Setup BWOI for GDK command-line
     inputs:
@@ -170,7 +171,7 @@ jobs:
         echo ##vso[task.prependpath]%WindowsSdkBinPath%x64
         echo ##vso[task.prependpath]%WindowsSdkVerBinPath%x64
         echo ##vso[task.prependpath]%VCToolsInstallDir%bin\HostX64\x64
-        call $(Build.SourcesDirectory)\build\SetupBWOI.cmd $(EXTRACTED_FOLDER)\GDK $(GDK_EDITION) PC
+        call $(Build.SourcesDirectory)\build\SetupBWOI.cmd $(EXTRACTED_FOLDER) $(GDK_EDITION) PC
         echo ##vso[task.setvariable variable=GameDKLatest;]%GameDKLatest%
         echo ##vso[task.setvariable variable=GRDKLatest;]%GRDKLatest%
         echo ##vso[task.setvariable variable=INCLUDE;]%INCLUDE%

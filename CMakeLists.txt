@@ -3,7 +3,7 @@
 
 cmake_minimum_required (VERSION 3.20)
 
-set(DIRECTXTK_VERSION 1.8.8)
+set(DIRECTXTK_VERSION 1.8.9)
 
 if(WINDOWS_STORE OR (DEFINED XBOX_CONSOLE_TARGET))
   set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
@@ -31,6 +31,8 @@ option(ENABLE_SPECTRE_MITIGATION "Build using /Qspectre for MSVC" OFF)
 option(DISABLE_MSVC_ITERATOR_DEBUGGING "Disable iterator debugging in Debug configurations with the MSVC CRT" OFF)
 
 option(ENABLE_CODE_ANALYSIS "Use Static Code Analysis on build" OFF)
+
+option(ENABLE_CODE_COVERAGE "Build with code-coverage" OFF)
 
 option(USE_PREBUILT_SHADERS "Use externally built HLSL shaders" OFF)
 
@@ -61,6 +63,7 @@ elseif(WINDOWS_STORE)
 endif()
 
 include(GNUInstallDirs)
+include(build/CompilerAndLinker.cmake)
 
 #--- Library
 set(LIBRARY_HEADERS
@@ -85,6 +88,7 @@ set(LIBRARY_SOURCES
     Src/BasicEffect.cpp
     Src/BasicPostProcess.cpp
     Src/BufferHelpers.cpp
+    Src/CMO.h
     Src/CommonStates.cpp
     Src/DDSTextureLoader.cpp
     Src/DebugEffect.cpp
@@ -224,12 +228,19 @@ else()
 endif()
 
 if(NOT USE_PREBUILT_SHADERS)
+    if(BUILD_XBOXONE_SHADERS)
+    else()
+        find_program(DIRECTX_FXC_TOOL FXC.EXE
+          HINTS "C:/Program Files (x86)/Windows Kits/10/bin/${CMAKE_SYSTEM_VERSION}/${DIRECTX_HOST_ARCH}"
+                "C:/Program Files (x86)/Windows Kits/10/bin/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/${DIRECTX_HOST_ARCH}")
+        message(STATUS "Using LegacyShaderCompiler found in ${DIRECTX_FXC_TOOL}")
+    endif()
     add_custom_command(
         OUTPUT "${COMPILED_SHADERS}/SpriteEffect_SpriteVertexShader.inc"
         MAIN_DEPENDENCY "${PROJECT_SOURCE_DIR}/Src/Shaders/CompileShaders.cmd"
         DEPENDS ${SHADER_SOURCES}
         COMMENT "Generating HLSL shaders..."
-        COMMAND ${CMAKE_COMMAND} -E env CompileShadersOutput="${COMPILED_SHADERS}" CompileShaders.cmd ARGS ${ShaderOpts} > "${COMPILED_SHADERS}/compileshaders.log"
+        COMMAND ${CMAKE_COMMAND} -E env CompileShadersOutput="${COMPILED_SHADERS}" $<$<BOOL:${DIRECTX_FXC_TOOL}>:LegacyShaderCompiler=${DIRECTX_FXC_TOOL}> CompileShaders.cmd ARGS ${ShaderOpts} > "${COMPILED_SHADERS}/compileshaders.log"
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/Src/Shaders"
         USES_TERMINAL)
 endif()
@@ -359,6 +370,7 @@ if(BUILD_TOOLS AND WIN32)
     xwbtool/xwbtool.cpp
     xwbtool/xwbtool.rc
     xwbtool/settings.manifest
+    xwbtool/CmdLineHelpers.h
     Audio/WAVFileReader.cpp
     Audio/WAVFileReader.h)
   target_compile_features(xwbtool PRIVATE cxx_std_17)
@@ -371,6 +383,10 @@ if(directxmath_FOUND)
     foreach(t IN LISTS TOOL_EXES ITEMS ${PROJECT_NAME})
       target_link_libraries(${t} PUBLIC Microsoft::DirectXMath)
     endforeach()
+endif()
+
+if(TOOL_EXES)
+  message(STATUS "Building tools: ${TOOL_EXES}")
 endif()
 
 # Model uses dynamic_cast, so we need /GR (Enable RTTI)
@@ -386,8 +402,6 @@ if(MSVC)
       endforeach()
     endif()
 endif()
-
-include(build/CompilerAndLinker.cmake)
 
 foreach(t IN LISTS TOOL_EXES ITEMS ${PROJECT_NAME})
   target_compile_definitions(${t} PRIVATE ${COMPILER_DEFINES})
@@ -422,6 +436,7 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
     set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 14)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     if(ENABLE_CODE_ANALYSIS)
+      message(STATUS "Building with Code Analysis (PREFIX)")
       foreach(t IN LISTS TOOL_EXES ITEMS ${PROJECT_NAME})
         target_compile_options(${t} PRIVATE /analyze /WX)
       endforeach()
@@ -445,13 +460,16 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
       target_compile_options(${t} PRIVATE ${WarningsEXE})
     endforeach()
 
-    if(BUILD_FUZZING
-        AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.32)
-        AND (NOT WINDOWS_STORE))
-          foreach(t IN LISTS TOOL_EXES ITEMS ${PROJECT_NAME})
-            target_compile_options(${t} PRIVATE ${ASAN_SWITCHES})
-            target_link_libraries(${t} PRIVATE ${ASAN_LIBS})
-          endforeach()
+    if(BUILD_FUZZING AND (NOT WINDOWS_STORE))
+      string(REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
+      string(REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO ${CMAKE_CXX_FLAGS_RELWITHDEBINFO})
+
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.32)
+        foreach(t IN LISTS TOOL_EXES ITEMS ${PROJECT_NAME})
+          target_compile_options(${t} PRIVATE ${ASAN_SWITCHES})
+          target_link_libraries(${t} PRIVATE ${ASAN_LIBS})
+        endforeach()
+      endif()
     endif()
 endif()
 
@@ -503,6 +521,10 @@ if(WIN32 AND (NOT WINDOWS_STORE) AND (NOT (DEFINED XBOX_CONSOLE_TARGET)))
     if(BUILD_TESTING AND (EXISTS "${CMAKE_CURRENT_LIST_DIR}/Tests/CMakeLists.txt"))
         enable_testing()
         add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/Tests)
+
+        if(ENABLE_CODE_COVERAGE AND (DEFINED COV_COMPILER_SWITCHES))
+          target_compile_options(${PROJECT_NAME} PRIVATE ${COV_COMPILER_SWITCHES})
+        endif()
     elseif(BUILD_FUZZING AND (EXISTS "${CMAKE_CURRENT_LIST_DIR}/Tests/fuzzloaders/CMakeLists.txt"))
         message(STATUS "Building for fuzzing")
         add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/Tests/fuzzloaders)
